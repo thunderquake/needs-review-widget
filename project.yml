@@ -1,0 +1,57 @@
+name: NeedsReview
+options:
+  bundleIdPrefix: com.thunderquake
+  deploymentTarget:
+    macOS: "14.0"
+  createIntermediateGroups: true
+
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    CODE_SIGN_STYLE: Automatic
+    DEVELOPMENT_TEAM: G2PDWP67JH
+    MARKETING_VERSION: "1.0"
+    CURRENT_PROJECT_VERSION: "1"
+    ENABLE_HARDENED_RUNTIME: YES
+
+targets:
+  NeedsReview:
+    type: application
+    platform: macOS
+    sources: [NeedsReview, Shared]
+    info:
+      path: NeedsReview/Info.plist
+      properties:
+        CFBundleName: NeedsReview
+        CFBundleDisplayName: Needs Review
+        LSMinimumSystemVersion: "14.0"
+        NSPrincipalClass: NSApplication
+        LSUIElement: true
+        CFBundleURLTypes:
+          - CFBundleURLName: com.thunderquake.NeedsReview
+            CFBundleURLSchemes: [needsreview]
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.thunderquake.NeedsReview
+        CODE_SIGN_ENTITLEMENTS: NeedsReview/NeedsReview.entitlements
+    dependencies:
+      - target: NeedsReviewWidget
+        embed: true
+        codeSign: true
+
+  NeedsReviewWidget:
+    type: app-extension
+    platform: macOS
+    sources: [NeedsReviewWidget, Shared]
+    info:
+      path: NeedsReviewWidget/Info.plist
+      properties:
+        CFBundleName: NeedsReviewWidget
+        CFBundleDisplayName: Needs Review
+        LSMinimumSystemVersion: "14.0"
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.widgetkit-extension
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.thunderquake.NeedsReview.Widget
+        CODE_SIGN_ENTITLEMENTS: NeedsReviewWidget/NeedsReviewWidget.entitlements
