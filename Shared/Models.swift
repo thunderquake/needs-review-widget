@@ -14,8 +14,11 @@ struct PullRequest: Identifiable, Codable, Hashable {
     let engaged: [String]
     let updatedAt: Date
 
-    var ageDays: Int {
-        max(0, Calendar.current.dateComponents([.day], from: updatedAt, to: Date()).day ?? 0)
+    /// Takes a reference date rather than reading the clock: a widget view is
+    /// archived when the timeline is built, so Date() inside it would freeze
+    /// at build time and the age would drift until the next reload.
+    func age(asOf reference: Date) -> TimeInterval {
+        max(0, reference.timeIntervalSince(updatedAt))
     }
 }
 

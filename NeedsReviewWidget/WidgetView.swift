@@ -107,10 +107,10 @@ struct ReviewWidgetView: View {
 
             Spacer(minLength: 4)
 
-            Text(verbatim: "\(pr.ageDays)d")
+            Text(verbatim: age(of: pr))
                 .font(.system(size: 9))
                 .monospacedDigit()
-                .foregroundStyle(ageColor(pr.ageDays))
+                .foregroundStyle(ageColor(days: days(of: pr)))
 
             Link(destination: forwarded(githubURL(for: pr))) {
                 Image(systemName: "arrow.up.forward.square")
@@ -129,7 +129,23 @@ struct ReviewWidgetView: View {
         return parts.joined(separator: " · ")
     }
 
-    private func ageColor(_ days: Int) -> Color {
+    /// Scaled to whatever reads smallest: minutes for something just pushed,
+    /// days for something that has been sitting.
+    private func age(of pr: PullRequest) -> String {
+        let minutes = Int(pr.age(asOf: entry.date) / 60)
+        switch minutes {
+        case ..<1: return "now"
+        case ..<60: return "\(minutes)m"
+        case ..<(60 * 24): return "\(minutes / 60)h"
+        default: return "\(minutes / (60 * 24))d"
+        }
+    }
+
+    private func days(of pr: PullRequest) -> Int {
+        Int(pr.age(asOf: entry.date) / 86_400)
+    }
+
+    private func ageColor(days: Int) -> Color {
         if days > 45 { return .red }
         if days > 14 { return .orange }
         return .secondary
