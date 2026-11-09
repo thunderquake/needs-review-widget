@@ -12,6 +12,7 @@ struct ReviewWidgetView: View {
             header
             content
             Spacer(minLength: 0)
+            if entry.configured { footer }
         }
     }
 
@@ -30,6 +31,18 @@ struct ReviewWidgetView: View {
         if !entry.configured { return "setup" }
         if entry.error != nil { return "error" }
         return entry.pullRequests.isEmpty ? "clear" : String(entry.pullRequests.count)
+    }
+
+    /// Text(_:style: .relative) keeps counting on its own between timeline
+    /// reloads, so this stays honest without costing a refresh.
+    private var footer: some View {
+        HStack(spacing: 3) {
+            Text(verbatim: "updated")
+            Text(entry.date, style: .relative)
+            Text(verbatim: "ago")
+        }
+        .font(.system(size: 9))
+        .foregroundStyle(.tertiary)
     }
 
     @ViewBuilder
