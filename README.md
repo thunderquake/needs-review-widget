@@ -53,8 +53,13 @@ Opening the app normally shows the settings window as usual.
 
 ## Notes
 
-- The widget refreshes every 15 minutes at most. WidgetKit decides the real
-  cadence from its own daily budget, so treat it as approximate.
+- The widget asks to refresh every 15 minutes. WidgetKit decides the real
+  cadence from its own daily budget, so treat it as approximate — the refresh
+  button in the header forces one, and being user-initiated it does not spend
+  budget.
+- A single fetch is published as many timeline entries, one per display step.
+  That is what lets the footer count up in whole minutes between reloads
+  instead of freezing at the value it was rendered with.
 - Fetches are capped at 25 PRs to stay inside the extension's time budget.
 - Reviews are read one page deep (100 per PR), which no real PR exceeds.
 - A failed fetch renders as an error, never as an empty list — an expired token
