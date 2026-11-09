@@ -1,7 +1,11 @@
 import WidgetKit
 
 struct ReviewEntry: TimelineEntry {
+    /// When this entry should be shown.
     let date: Date
+    /// When the data in it was actually fetched. The gap between the two is
+    /// what the footer reports.
+    let fetchedAt: Date
     let pullRequests: [PullRequest]
     /// Set when the fetch failed, so an expired token never looks like an
     /// empty review queue.
@@ -9,12 +13,21 @@ struct ReviewEntry: TimelineEntry {
     let configured: Bool
 
     static func empty(configured: Bool = true) -> ReviewEntry {
-        ReviewEntry(date: Date(), pullRequests: [], error: nil, configured: configured)
+        let now = Date()
+        return ReviewEntry(date: now, fetchedAt: now, pullRequests: [], error: nil, configured: configured)
     }
 }
 
 struct ReviewProvider: TimelineProvider {
     private static let refreshInterval: TimeInterval = 15 * 60
+
+    /// One entry per step, all sharing the same fetched data. WidgetKit shows
+    /// each at its own date without a reload, which is how the footer can
+    /// count in whole minutes without spending refresh budget.
+    private static var displayOffsets: [TimeInterval] {
+        Array(stride(from: 0.0, through: 600.0, by: 60.0))
+            + Array(stride(from: 900.0, through: 3600.0, by: 300.0))
+    }
 
     func placeholder(in context: Context) -> ReviewEntry { .empty() }
 
@@ -24,21 +37,32 @@ struct ReviewProvider: TimelineProvider {
 
     func getTimeline(in context: Context, completion: @escaping (Timeline<ReviewEntry>) -> Void) {
         Task {
-            let next = Date().addingTimeInterval(Self.refreshInterval)
+            let now = Date()
+            let next = now.addingTimeInterval(Self.refreshInterval)
 
             guard let config = ConfigStore.load(), config.isComplete else {
                 completion(Timeline(entries: [.empty(configured: false)], policy: .after(next)))
                 return
             }
 
-            let entry: ReviewEntry
+            var pullRequests: [PullRequest] = []
+            var errorText: String?
             do {
-                let pullRequests = try await ReviewQueue.fetch(config: config)
-                entry = ReviewEntry(date: Date(), pullRequests: pullRequests, error: nil, configured: true)
-            } catch {
-                entry = ReviewEntry(date: Date(), pullRequests: [], error: error.localizedDescription, configured: true)
+                pullRequests = try await ReviewQueue.fetch(config: config)
+            } catch let fetchError {
+                errorText = fetchError.localizedDescription
             }
-            completion(Timeline(entries: [entry], policy: .after(next)))
+
+            let entries = Self.displayOffsets.map { offset in
+                ReviewEntry(
+                    date: now.addingTimeInterval(offset),
+                    fetchedAt: now,
+                    pullRequests: pullRequests,
+                    error: errorText,
+                    configured: true
+                )
+            }
+            completion(Timeline(entries: entries, policy: .after(next)))
         }
     }
 }

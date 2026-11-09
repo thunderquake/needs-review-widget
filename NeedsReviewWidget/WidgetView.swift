@@ -1,3 +1,4 @@
+import AppIntents
 import SwiftUI
 import WidgetKit
 
@@ -14,16 +15,23 @@ struct ReviewWidgetView: View {
             Spacer(minLength: 0)
             if entry.configured { footer }
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private var header: some View {
-        HStack {
+        HStack(spacing: 6) {
             Text("Needs review")
                 .font(.system(size: 13, weight: .semibold))
             Spacer()
             Text(status)
                 .font(.system(size: 10))
                 .foregroundStyle(.secondary)
+            Button(intent: RefreshIntent()) {
+                Image(systemName: "arrow.clockwise")
+                    .font(.system(size: 10, weight: .medium))
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(.secondary)
         }
     }
 
@@ -33,16 +41,25 @@ struct ReviewWidgetView: View {
         return entry.pullRequests.isEmpty ? "clear" : String(entry.pullRequests.count)
     }
 
-    /// Text(_:style: .relative) keeps counting on its own between timeline
-    /// reloads, so this stays honest without costing a refresh.
+    /// Whole minutes only. The value comes from the entry's own date rather
+    /// than a live clock, so each stepped timeline entry renders the next
+    /// figure without a reload.
     private var footer: some View {
-        HStack(spacing: 3) {
-            Text(verbatim: "updated")
-            Text(entry.date, style: .relative)
-            Text(verbatim: "ago")
+        Text(verbatim: ageLabel)
+            .font(.system(size: 9))
+            .foregroundStyle(.tertiary)
+            .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var ageLabel: String {
+        let minutes = Int(entry.date.timeIntervalSince(entry.fetchedAt) / 60)
+        switch minutes {
+        case ..<1: return "updated just now"
+        case 1: return "updated 1 min ago"
+        case ..<60: return "updated \(minutes) min ago"
+        case ..<120: return "updated 1 hr ago"
+        default: return "updated \(minutes / 60) hrs ago"
         }
-        .font(.system(size: 9))
-        .foregroundStyle(.tertiary)
     }
 
     @ViewBuilder
