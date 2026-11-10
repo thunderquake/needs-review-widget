@@ -6,6 +6,7 @@ struct ReviewView: View {
     @StateObject var model: ReviewModel
     @State private var confirming: GitHubClient.ReviewEvent?
     @FocusState private var keysFocused: Bool
+    @FocusState private var editorFocused: Bool
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -20,6 +21,12 @@ struct ReviewView: View {
         .focusEffectDisabled()
         .focused($keysFocused)
         .onAppear { keysFocused = true }
+        // Put the cursor in the comment as soon as editing starts, so typing
+        // goes there rather than to the j/k/x/e keys.
+        .onChange(of: model.editing) { _, editing in
+            guard editing != nil else { return }
+            DispatchQueue.main.async { editorFocused = true }
+        }
         .onKeyPress(keys: ["j", "k", "x", "e"]) { press in
             guard model.editing == nil, !model.comments.isEmpty else { return .ignored }
             let current = model.comments[min(model.selection, model.comments.count - 1)]
@@ -121,7 +128,8 @@ struct ReviewView: View {
                         ForEach(Array(model.comments.enumerated()), id: \.element.id) { index, comment in
                             card(comment, selected: index == model.selection)
                                 .id(comment.id)
-                                .onTapGesture { model.selection = index }
+                                // Simultaneous, so a click inside the editor still reaches it.
+                                .simultaneousGesture(TapGesture().onEnded { model.selection = index })
                         }
                     }
                     .padding(16)
@@ -202,6 +210,21 @@ struct ReviewView: View {
                     if !attachable {
                         Text("line is not in the diff").font(.caption).foregroundStyle(.orange)
                     }
+                    if model.text(for: comment) != comment.body {
+                        Text("edited").font(.caption).foregroundStyle(.tertiary)
+                    }
+                    Spacer()
+                    if !model.isPosted, model.editing != comment.id {
+                        Button {
+                            model.selection = model.comments.firstIndex(of: comment) ?? model.selection
+                            model.editing = comment.id
+                        } label: {
+                            Label("Edit", systemImage: "pencil")
+                        }
+                        .buttonStyle(.borderless)
+                        .controlSize(.small)
+                        .help("Edit before posting (e)")
+                    }
                 }
 
                 if let line = model.diffLines[comment.path]?[comment.line],
@@ -224,6 +247,7 @@ struct ReviewView: View {
                     ))
                     .font(.body)
                     .frame(minHeight: 70)
+                    .focused($editorFocused)
                     .scrollContentBackground(.hidden)
                     .padding(6)
                     .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 6))
