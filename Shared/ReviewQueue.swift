@@ -4,10 +4,7 @@ import Foundation
 /// team has approved yet. A teammate's comment leaves the PR in the list; a
 /// teammate's approval removes it.
 enum ReviewQueue {
-    /// Reviews are fetched per PR, so cap the fan-out to stay inside the
-    /// widget extension's time budget.
     private static let maxPullRequests = 25
-    private static let maxConcurrentRequests = 4
 
     static func fetch(config: Config) async throws -> [PullRequest] {
         let client = GitHubClient(token: config.token)
@@ -36,46 +33,46 @@ enum ReviewQueue {
             .sorted { $0.updatedAt < $1.updatedAt }
             .prefix(maxPullRequests)
 
+        let details = try await client.details(
+            for: shortlist.map { (repo: $0.repo, number: $0.number) }
+        )
+
+        let teams = Set(config.teams)
         var open: [PullRequest] = []
-        try await withThrowingTaskGroup(of: PullRequest?.self) { group in
-            var queued = 0
-            for item in shortlist {
-                // GitHub asks for serial requests per user and answers bursts
-                // with a secondary-rate-limit 403, so keep the fan-out small.
-                if queued >= maxConcurrentRequests {
-                    if let pullRequest = try await group.next() ?? nil { open.append(pullRequest) }
-                    queued -= 1
-                }
-                queued += 1
-                group.addTask {
-                    let reviews = try await client.reviews(repo: item.repo, number: item.number)
-                    let byTeam = reviews.compactMap { review -> (login: String, state: String)? in
-                        guard let login = review.user?.login, members.contains(login) else { return nil }
-                        return (login, review.state)
-                    }
 
-                    guard !byTeam.contains(where: { $0.state == "APPROVED" }) else { return nil }
+        for item in shortlist {
+            guard let detail = details["\(item.repo)#\(item.number)"] else { continue }
 
-                    let engaged = byTeam
-                        .filter { $0.state == "COMMENTED" || $0.state == "CHANGES_REQUESTED" }
-                        .map(\.login)
+            let byTeam = detail.reviews.filter { members.contains($0.login) }
+            guard !byTeam.contains(where: { $0.state == "APPROVED" }) else { continue }
 
-                    return PullRequest(
-                        number: item.number,
-                        title: item.title,
-                        author: item.author,
-                        repo: item.repo,
-                        isDraft: item.isDraft,
-                        engaged: Array(Set(engaged)).sorted(),
-                        updatedAt: item.updatedAt
-                    )
-                }
-            }
-            for try await pullRequest in group {
-                if let pullRequest { open.append(pullRequest) }
-            }
+            let engaged = byTeam
+                .filter { $0.state == "COMMENTED" || $0.state == "CHANGES_REQUESTED" }
+                .map(\.login)
+
+            // The first time it landed in your queue, by name or by team. That
+            // is the clock worth watching — a PR can be updated hourly and
+            // still have been waiting on you for a week.
+            let askedAt = detail.requests
+                .filter { $0.login == config.username || teams.contains($0.teamSlug ?? "") }
+                .map(\.at)
+                .min()
+
+            open.append(
+                PullRequest(
+                    number: item.number,
+                    title: item.title,
+                    author: item.author,
+                    repo: item.repo,
+                    isDraft: item.isDraft,
+                    engaged: Array(Set(engaged)).sorted(),
+                    updatedAt: item.updatedAt,
+                    requestedAt: askedAt
+                )
+            )
         }
 
-        return open.sorted { $0.updatedAt < $1.updatedAt }
+        // Longest wait first.
+        return open.sorted { $0.waitingSince < $1.waitingSince }
     }
 }
