@@ -6,6 +6,27 @@ import Foundation
 enum ReviewQueue {
     private static let maxPullRequests = 25
 
+    /// Each reviewer's standing, the way GitHub itself decides it: a plain
+    /// comment leaves their position unchanged, and a dismissed approval is
+    /// withdrawn. So the last decisive review wins, not merely any approval —
+    /// otherwise someone who approves and later requests changes would keep
+    /// the PR hidden while it is actually blocked.
+    ///
+    /// Reviews must arrive oldest first, which is what GraphQL's
+    /// reviews(last:) returns.
+    static func effectiveStates(of reviews: [(login: String, state: String)]) -> [String: String] {
+        var latest: [String: String] = [:]
+        for review in reviews {
+            switch review.state {
+            case "APPROVED", "CHANGES_REQUESTED", "DISMISSED":
+                latest[review.login] = review.state
+            default:
+                continue // COMMENTED and PENDING leave the standing alone
+            }
+        }
+        return latest
+    }
+
     static func fetch(config: Config) async throws -> [PullRequest] {
         let client = GitHubClient(token: config.token)
 
@@ -44,7 +65,7 @@ enum ReviewQueue {
             guard let detail = details["\(item.repo)#\(item.number)"] else { continue }
 
             let byTeam = detail.reviews.filter { members.contains($0.login) }
-            guard !byTeam.contains(where: { $0.state == "APPROVED" }) else { continue }
+            guard !effectiveStates(of: byTeam).values.contains("APPROVED") else { continue }
 
             let engaged = byTeam
                 .filter { $0.state == "COMMENTED" || $0.state == "CHANGES_REQUESTED" }
