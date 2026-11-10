@@ -12,10 +12,17 @@ struct GitHubClient {
         let updatedAt: Date
     }
 
-    /// Reviews and review-request events for one PR, fetched together.
+    /// Reviews, review-request events and recent activity for one PR, fetched together.
     struct Detail {
-        let reviews: [(login: String, state: String)]
+        /// Oldest first.
+        let reviews: [(login: String, state: String, at: Date?)]
         let requests: [(login: String?, teamSlug: String?, at: Date)]
+        /// The viewer's own reviews, asked for separately: on a busy PR they
+        /// can sit outside the last hundred reviews.
+        let ownReviews: [(state: String, at: Date?)]
+        let lastCommitAt: Date?
+        /// Plain conversation comments, newest last.
+        let comments: [(login: String, at: Date)]
     }
 
     private static let session: URLSession = {
@@ -58,6 +65,10 @@ struct GitHubClient {
             throw Self.forbidden(http: http, data: data)
         case 404:
             throw GitHubError(message: "Not found — check org and team names")
+        case 422:
+            let body = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
+            let reasons = (body?["errors"] as? [Any])?.map { "\($0)" }.joined(separator: "; ")
+            throw GitHubError(message: reasons ?? (body?["message"] as? String) ?? "GitHub refused the request (422)")
         default:
             throw GitHubError(message: "GitHub returned \(http.statusCode)")
         }
@@ -138,6 +149,82 @@ struct GitHubClient {
         }
     }
 
+    struct PullRequestInfo {
+        let title: String
+        let author: String
+        let headSha: String
+    }
+
+    func pullRequest(repo: String, number: Int) async throws -> PullRequestInfo {
+        struct Response: Decodable {
+            struct User: Decodable { let login: String }
+            struct Head: Decodable { let sha: String }
+            let title: String
+            let user: User?
+            let head: Head
+        }
+        guard let url = URL(string: "https://api.github.com/repos/\(repo)/pulls/\(number)") else {
+            throw GitHubError(message: "Bad repo name")
+        }
+        let response = try await get(url, as: Response.self)
+        return PullRequestInfo(title: response.title, author: response.user?.login ?? "", headSha: response.head.sha)
+    }
+
+    /// Each changed file's patch, keyed by path. Files GitHub sends without a
+    /// patch (binary, or too large) are simply absent.
+    func pullRequestPatches(repo: String, number: Int) async throws -> [String: String] {
+        struct File: Decodable {
+            let filename: String
+            let patch: String?
+        }
+        var patches: [String: String] = [:]
+        for page in 1...10 {
+            guard let url = URL(string: "https://api.github.com/repos/\(repo)/pulls/\(number)/files?per_page=100&page=\(page)") else {
+                throw GitHubError(message: "Bad repo name")
+            }
+            let files = try await get(url, as: [File].self)
+            for file in files { patches[file.filename] = file.patch }
+            if files.count < 100 { break }
+        }
+        return patches
+    }
+
+    enum ReviewEvent: String {
+        case comment = "COMMENT"
+        case approve = "APPROVE"
+    }
+
+    /// Posts one review carrying every comment, pinned to the commit that was
+    /// reviewed. It is a single request, so either all of it lands or none.
+    /// Returns the new review's id.
+    func submitReview(
+        repo: String,
+        number: Int,
+        commitId: String,
+        event: ReviewEvent,
+        body: String?,
+        comments: [(path: String, line: Int, body: String)]
+    ) async throws -> Int {
+        struct Response: Decodable { let id: Int }
+        guard let url = URL(string: "https://api.github.com/repos/\(repo)/pulls/\(number)/reviews") else {
+            throw GitHubError(message: "Bad repo name")
+        }
+
+        var payload: [String: Any] = [
+            "commit_id": commitId,
+            "event": event.rawValue,
+            "comments": comments.map {
+                ["path": $0.path, "line": $0.line, "side": "RIGHT", "body": $0.body] as [String: Any]
+            },
+        ]
+        if let body, !body.isEmpty { payload["body"] = body }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.httpBody = try JSONSerialization.data(withJSONObject: payload)
+        return try await send(request, as: Response.self).id
+    }
+
     // MARK: - GraphQL
 
     /// Reviews plus review-request events for many PRs at once, keyed by
@@ -147,19 +234,19 @@ struct GitHubClient {
     /// a busy PR runs to several hundred events across six pages, purely to
     /// find a handful of review requests. GraphQL filters server side, so a
     /// batch of PRs costs a single request.
-    func details(for refs: [(repo: String, number: Int)]) async throws -> [String: Detail] {
+    func details(for refs: [(repo: String, number: Int)], viewer: String) async throws -> [String: Detail] {
         var collected: [String: Detail] = [:]
         for chunk in stride(from: 0, to: refs.count, by: Self.batchSize).map({
             Array(refs[$0..<min($0 + Self.batchSize, refs.count)])
         }) {
-            try await collected.merge(details(forChunk: chunk)) { current, _ in current }
+            try await collected.merge(details(forChunk: chunk, viewer: viewer)) { current, _ in current }
         }
         return collected
     }
 
     private static let batchSize = 10
 
-    private func details(forChunk refs: [(repo: String, number: Int)]) async throws -> [String: Detail] {
+    private func details(forChunk refs: [(repo: String, number: Int)], viewer: String) async throws -> [String: Detail] {
         var aliases: [String: String] = [:]
         var selections: [String] = []
 
@@ -179,7 +266,10 @@ struct GitHubClient {
         let query = """
         { \(selections.joined(separator: "\n")) }
         fragment detail on PullRequest {
-          reviews(last: 100) { nodes { author { login } state } }
+          reviews(last: 100) { nodes { author { login } state submittedAt } }
+          own: reviews(last: 30, author: "\(viewer)") { nodes { state submittedAt } }
+          commits(last: 1) { nodes { commit { committedDate } } }
+          comments(last: 20) { nodes { author { login } createdAt } }
           timelineItems(itemTypes: [REVIEW_REQUESTED_EVENT], first: 100) {
             nodes {
               ... on ReviewRequestedEvent {
@@ -205,11 +295,16 @@ struct GitHubClient {
             guard let key = aliases[alias], let pr = node.pullRequest else { continue }
             result[key] = Detail(
                 reviews: (pr.reviews?.nodes ?? []).compactMap { review in
-                    review.author.map { ($0.login, review.state) }
+                    review.author.map { ($0.login, review.state, review.submittedAt) }
                 },
                 requests: (pr.timelineItems?.nodes ?? []).compactMap { event in
                     guard let at = event.createdAt else { return nil }
                     return (event.requestedReviewer?.login, event.requestedReviewer?.slug, at)
+                },
+                ownReviews: (pr.own?.nodes ?? []).map { ($0.state, $0.submittedAt) },
+                lastCommitAt: pr.commits?.nodes?.last?.commit.committedDate,
+                comments: (pr.comments?.nodes ?? []).compactMap { comment in
+                    comment.author.map { ($0.login, comment.createdAt) }
                 }
             )
         }
@@ -225,6 +320,22 @@ struct GitHubClient {
                 struct Author: Decodable { let login: String }
                 let author: Author?
                 let state: String
+                let submittedAt: Date?
+            }
+            struct Commits: Decodable {
+                struct Node: Decodable {
+                    struct Commit: Decodable { let committedDate: Date }
+                    let commit: Commit
+                }
+                let nodes: [Node]?
+            }
+            struct Comments: Decodable {
+                struct Node: Decodable {
+                    struct Author: Decodable { let login: String }
+                    let author: Author?
+                    let createdAt: Date
+                }
+                let nodes: [Node]?
             }
             struct Timeline: Decodable { let nodes: [EventNode]? }
             struct EventNode: Decodable {
@@ -235,7 +346,17 @@ struct GitHubClient {
                 let createdAt: Date?
                 let requestedReviewer: Reviewer?
             }
+            struct OwnReviews: Decodable {
+                struct Node: Decodable {
+                    let state: String
+                    let submittedAt: Date?
+                }
+                let nodes: [Node]?
+            }
             let reviews: Reviews?
+            let own: OwnReviews?
+            let commits: Commits?
+            let comments: Comments?
             let timelineItems: Timeline?
         }
 

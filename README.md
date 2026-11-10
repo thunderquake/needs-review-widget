@@ -18,8 +18,8 @@ xcodegen generate
 open NeedsReview.xcodeproj
 ```
 
-Build and run the `NeedsReview` scheme once. That installs the widget extension
-and registers it with macOS, after which it appears under right-click desktop →
+Or `./scripts/install.sh`, which builds, installs to `/Applications` and restarts the
+widget host. Either way the widget extension gets registered with macOS, after which it appears under right-click desktop →
 Edit Widgets.
 
 ## Setup
@@ -39,6 +39,34 @@ otherwise GitHub answers 403 and the widget says so.
 The config is stored in the keychain under a Team-ID-prefixed access group, which
 is how the widget extension reads it. App groups are deliberately avoided —
 free Personal Teams can sign keychain sharing but not app groups.
+
+## Drafted reviews
+
+The ✦ on a row runs the `review-pr` skill headlessly (`claude -p`, in the checkout set
+under Reviews in the app) and the row then shows the verdict. Clicking a row opens the
+review window: the approve call, each draft with its diff line, and the buttons that post.
+
+- The run only drafts. It is told never to write to GitHub and the posting commands are
+  denied to it; the result lands in `~/.claude/review-kb/reviews/<owner>-<repo>-<n>.json`.
+- Posting is one GitHub review pinned to the commit that was reviewed. If the PR has moved
+  on, posting is refused until a re-run. A draft whose line is not in the diff is flagged
+  and cannot be ticked.
+- What became of each draft (posted, edited, dropped) is appended to
+  `~/.claude/review-kb/outcomes.jsonl`.
+- PRs you reviewed without approving come back as follow-ups, in amber, once the author
+  pushes or replies.
+- "Review new requests automatically" keeps the app running in the background (it opens
+  at login) and drafts a review once a request has waited 15 minutes, up to the daily cap.
+
+The standalone `claude` CLI has its own sign-in, separate from the desktop app:
+`claude auth login`. Two entry points help when checking the pieces without the widget:
+
+```
+/Applications/NeedsReview.app/Contents/MacOS/NeedsReview --check-config
+/Applications/NeedsReview.app/Contents/MacOS/NeedsReview --review Redocly/redocly 33228
+```
+
+The host app is not sandboxed, because it has to start `claude`; the widget extension is.
 
 ## Why the app is an agent
 

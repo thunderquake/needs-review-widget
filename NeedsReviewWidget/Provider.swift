@@ -11,6 +11,8 @@ struct ReviewEntry: TimelineEntry {
     /// empty review queue.
     let error: String?
     let configured: Bool
+    /// Drafted-review state per PR, mirrored into the keychain by the app.
+    var statuses: [String: ReviewStatus] = [:]
 
     static func empty(configured: Bool = true) -> ReviewEntry {
         let now = Date()
@@ -53,13 +55,15 @@ struct ReviewProvider: TimelineProvider {
                 errorText = fetchError.localizedDescription
             }
 
+            let statuses = ReviewStatusStore.load()
             let entries = Self.displayOffsets.map { offset in
                 ReviewEntry(
                     date: now.addingTimeInterval(offset),
                     fetchedAt: now,
                     pullRequests: pullRequests,
                     error: errorText,
-                    configured: true
+                    configured: true,
+                    statuses: statuses
                 )
             }
             completion(Timeline(entries: entries, policy: .after(next)))

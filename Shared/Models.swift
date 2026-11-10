@@ -17,6 +17,10 @@ struct PullRequest: Identifiable, Codable, Hashable {
     /// Absent only if the timeline did not reach back far enough.
     let requestedAt: Date?
 
+    /// Set when this is a PR you already reviewed without approving and the
+    /// author has since acted; says what they did.
+    var followUp: String? = nil
+
     /// The clock the widget shows: how long this has been waiting on you.
     var waitingSince: Date { requestedAt ?? updatedAt }
 

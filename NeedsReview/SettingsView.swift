@@ -21,6 +21,17 @@ struct SettingsView: View {
                 Toggle("Include drafts", isOn: $config.showDrafts)
             }
 
+            Section("Reviews") {
+                TextField("Repository checkout", text: $config.repoPath)
+                Toggle("Review new requests automatically", isOn: $config.autoReview)
+                Stepper(value: $config.dailyReviewCap, in: 1...50) {
+                    Text(verbatim: "At most \(config.dailyReviewCap) reviews a day · \(ReviewRunner.runsToday) today")
+                }
+                Text("Reviews only draft. Nothing is posted until you post it from the review window. Automatic reviews start once a request has waited 15 minutes, and keep the app running in the background.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
             Section {
                 HStack {
                     Button("Save and test") { saveAndTest() }
@@ -33,7 +44,7 @@ struct SettingsView: View {
             }
         }
         .formStyle(.grouped)
-        .frame(width: 420)
+        .frame(width: 460)
         .padding(.vertical, 8)
     }
 
@@ -61,10 +72,17 @@ struct SettingsView: View {
             status = .failed("Fill in every field first.")
             return
         }
+        let wasAutomatic = ConfigStore.load()?.autoReview ?? false
         guard ConfigStore.save(config) else {
             status = .failed("Could not write to the keychain.")
             return
         }
+        if config.autoReview != wasAutomatic,
+           let problem = AutoReviewer.setOpenAtLogin(config.autoReview) {
+            status = .failed(problem)
+            return
+        }
+        AutoReviewer.shared.sync()
 
         Task {
             do {
