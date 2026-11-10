@@ -165,6 +165,7 @@ struct ReviewView: View {
                 Text("Top-level comment")
                     .font(.callout)
                     .foregroundStyle(.secondary)
+                if let why = model.result?.topLevelWhy, !why.isEmpty { whyNote(why) }
                 TextEditor(text: $model.topLevel)
                     .font(.body)
                     .frame(minHeight: 44)
@@ -214,6 +215,8 @@ struct ReviewView: View {
                         .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 5))
                 }
 
+                if let why = comment.why, !why.isEmpty { whyNote(why) }
+
                 if model.editing == comment.id {
                     TextEditor(text: Binding(
                         get: { model.text(for: comment) },
@@ -247,6 +250,23 @@ struct ReviewView: View {
         .background(selected ? Color.accentColor.opacity(0.08) : .clear, in: RoundedRectangle(cornerRadius: 8))
         .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(selected ? Color.accentColor.opacity(0.5) : Color.secondary.opacity(0.18)))
         .contentShape(Rectangle())
+    }
+
+    /// Why the draft is worth raising. Hers to read, never part of what is posted.
+    private func whyNote(_ text: String) -> some View {
+        Label {
+            Text(text).fixedSize(horizontal: false, vertical: true)
+        } icon: {
+            Image(systemName: "lightbulb")
+        }
+        .font(.callout)
+        .foregroundStyle(.secondary)
+        .textSelection(.enabled)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 5)
+        .background(Color.yellow.opacity(0.1), in: RoundedRectangle(cornerRadius: 5))
+        .help("Why this is worth raising — for you only, never posted")
     }
 
     // MARK: - Footer

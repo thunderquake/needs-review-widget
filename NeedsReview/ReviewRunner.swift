@@ -65,8 +65,9 @@ final class ReviewRunner {
     static func chatContract(draftPath: String) -> String {
         "You are continuing a review started by the Needs Review app. Whenever she asks you to change, "
             + "reword, add or drop draft comments, write the complete updated result to \(draftPath) in the same "
-            + "JSON shape as before (verdict, summary, topLevel, comments with path, line, body, rank, optional, "
-            + "entries) so the app shows it. Never post to GitHub."
+            + "JSON shape as before (verdict, summary, topLevel, topLevelWhy, comments with path, line, body, rank, "
+            + "optional, entries, why) so the app shows it. Keep a why for every draft, the pr-comments why line, "
+            + "updated when the comment changes; it is for her only and never goes into a body. Never post to GitHub."
     }
 
     // MARK: - Daily count
@@ -182,6 +183,7 @@ final class ReviewRunner {
             verdict: draft.verdict,
             summary: draft.summary,
             topLevel: draft.topLevel,
+            topLevelWhy: draft.topLevelWhy,
             comments: draft.comments.sorted { $0.rank < $1.rank },
             sessionId: run.sessionId
         )
@@ -205,14 +207,18 @@ final class ReviewRunner {
           "verdict": "can approve" | "comment first" | "needs a real look",
           "summary": "one line saying why",
           "topLevel": "a top-level comment worth posting, or null",
+          "topLevelWhy": "the why line for the top-level comment, or null",
           "comments": [
             { "path": "repo-relative path", "line": 123, "body": "the exact text to post",
+              "why": "the why line, for her only",
               "rank": 1, "optional": false, "entries": ["review-kb ids, if any"] }
           ]
         }
 
         Include every draft you would have shown her, worded by pr-comments so she can post it \
-        unedited. "line" is the line number in the new version of the file and must be a line \
+        unedited. "why" is the pr-comments why line: what goes wrong, and for whom, if she skips \
+        the comment, in plain words for her rather than the author. It is never posted, so keep \
+        it out of "body". "line" is the line number in the new version of the file and must be a line \
         that appears in the PR diff (added or context); for a finding about a removed line, use \
         the nearest line that is in the diff. "rank" starts at 1 for the most important. \
         "optional" is true for drafts she can skip. With nothing to raise, "comments" is [].

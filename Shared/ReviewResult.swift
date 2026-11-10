@@ -10,16 +10,20 @@ struct ReviewDraft: Decodable {
         var rank: Int
         var optional: Bool
         var entries: [String]
+        /// Why the comment is worth raising, written for her. Never posted;
+        /// missing from reviews made before it existed.
+        var why: String?
 
         var id: String { "\(path):\(line)#\(rank)" }
 
-        init(path: String, line: Int, body: String, rank: Int, optional: Bool, entries: [String]) {
+        init(path: String, line: Int, body: String, rank: Int, optional: Bool, entries: [String], why: String? = nil) {
             self.path = path
             self.line = line
             self.body = body
             self.rank = rank
             self.optional = optional
             self.entries = entries
+            self.why = why
         }
 
         /// Lenient about what a model tends to vary: a line given as a string,
@@ -38,12 +42,15 @@ struct ReviewDraft: Decodable {
             rank = (try? values.decode(Int.self, forKey: .rank)) ?? 99
             optional = (try? values.decode(Bool.self, forKey: .optional)) ?? false
             entries = (try? values.decode([String].self, forKey: .entries)) ?? []
+            why = (try? values.decodeIfPresent(String.self, forKey: .why)) ?? nil
         }
     }
 
     let verdict: String
     let summary: String
     let topLevel: String?
+    /// The why for the top-level comment, for her only.
+    let topLevelWhy: String?
     let comments: [Comment]
 }
 
@@ -59,6 +66,7 @@ struct ReviewResult: Codable {
     var verdict: String
     var summary: String
     var topLevel: String?
+    var topLevelWhy: String?
     var comments: [ReviewDraft.Comment]
     var sessionId: String?
     var postedAt: Date?
@@ -126,6 +134,7 @@ enum ReviewStore {
         result.verdict = draft.verdict
         result.summary = draft.summary
         result.topLevel = draft.topLevel
+        result.topLevelWhy = draft.topLevelWhy
         result.comments = draft.comments.sorted { $0.rank < $1.rank }
         // A new timestamp is what tells an open window its ticks are stale.
         result.reviewedAt = Date()
